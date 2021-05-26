@@ -3,7 +3,7 @@ import datetime
 from threading import Thread
 from multiprocessing import Pipe
 from multiprocessing.managers import BaseManager
-from utils import Packet, Promise
+from .utils import Packet, Promise
 
 class ParallelManager(BaseManager):  
   def __init__(self, *args, timeout=None, task_limit=None, revive_limit=0, **kwargs):

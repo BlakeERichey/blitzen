@@ -1,9 +1,9 @@
 import logging
 import datetime
-from utils import Packet, get_local_ip
-from base import BaseDispatcher
-from multicore import MulticoreDispatcher
-from managers import ParallelManager
+from .utils import Packet, get_local_ip
+from .base import BaseDispatcher
+from .multicore import MulticoreDispatcher
+from .managers import ParallelManager
 
 class DistributedDispatcher(BaseDispatcher):
 

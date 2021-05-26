@@ -1,8 +1,8 @@
 import datetime
 from threading import Thread
 from multiprocessing import Pipe, Process
-from utils import Packet
-from base import BaseDispatcher
+from .utils import Packet
+from .base import BaseDispatcher
 
 class MulticoreDispatcher(BaseDispatcher):
 

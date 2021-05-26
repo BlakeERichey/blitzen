@@ -1,9 +1,9 @@
 from setuptools import setup, find_packages
 
-setup(name='placeholder',
+setup(name='blitzen',
       version='0.0.1',
       packages=find_packages(),
-      description='placeholder',
+      description='Multiprocessing and Distributed computing dispatcher toolkit.',
       author = 'Blake Richey',
       author_email='blake.e.richey@gmail.com',
       install_requires=[

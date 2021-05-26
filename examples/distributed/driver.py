@@ -1,8 +1,8 @@
-from common import time_consuming_function, PORT
-from distributed import DistributedDispatcher
-import logging
 import time
-from utils import get_local_ip
+import logging
+from blitzen.utils import get_local_ip
+from blitzen.distributed import DistributedDispatcher
+from common import time_consuming_function, PORT
 
 logger = logging.getLogger()
 logger.setLevel(0)
