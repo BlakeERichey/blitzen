@@ -10,4 +10,4 @@ logger.setLevel(30)
 if __name__ == '__main__':
     ip = get_local_ip()
     backend = DistributedDispatcher(server_ip=ip, port=PORT)
-    backend.spawn_server(20)
+    backend.spawn_server()

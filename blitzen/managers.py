@@ -1,7 +1,7 @@
 import logging
 import datetime
 from threading import Thread
-from multiprocessing import Pipe
+from multiprocessing import Pipe, Lock
 from multiprocessing.managers import BaseManager
 from .utils import Packet, Promise
 
@@ -79,8 +79,11 @@ class ParallelManager(BaseManager):
         5. Close results-fetching threads.
     """
     logging.debug('Monitoring Clients')
-    self.connect()
+    # self.connect()
     while not self._close_thread:
+      ######## Critical Code (Async access to variables prohibited) ########
+      self.critical_lock.acquire()
+
       ######## Check for queued tasks and idle clients ######## 
       logging.debug(f'Queued tasks: {len(self.queued_tasks)}')
       if len(self.queued_tasks):
@@ -112,8 +115,7 @@ class ParallelManager(BaseManager):
         self._kill_tasks(tasks_to_kill)
       
       ######## Receive task results and check for revival packet ########
-      current_clients = list(self.clients.items()) #monitor is performed asynchonously, can change dict size during iteration
-      for client_id, client in current_clients:
+      for client_id, client in self.clients.items():
         logging.debug('Checking for results.')
         server_conn = client['connections'][0]
         
@@ -134,7 +136,7 @@ class ParallelManager(BaseManager):
             #Do not update results on an already marked `completed` task
       
       ######## Close results-fetching threads ########
-      thread_id_keys = list(self.fetch_results.keys())
+      thread_id_keys = list(self.fetch_results.keys()) #Because popping from self.fetch_results
       for thread_id in thread_id_keys:
         tfield = self.fetch_results[thread_id]
         thread = tfield['thread']
@@ -148,11 +150,14 @@ class ParallelManager(BaseManager):
         
           self.fetch_results.pop(thread_id) #Remove request
 
+      ######## Permit other threads temporary access to variables ########
+      self.critical_lock.release()
     
     logging.debug('Closing Monitor Thread.')
 
   def _start_sub_thread(self,):
-    self._close_thread = False #Used is shutdown to terminate monitor thread
+    self._close_thread = False  #Used is shutdown to terminate monitor thread
+    self.critical_lock = Lock() #Used for synchronizing critical points in async code
     self.monitor_thread = Thread(
       target=ParallelManager._monitor_clients, 
       args=(self,)
@@ -238,6 +243,9 @@ class ParallelManager(BaseManager):
         operation. If None, the default for the manager, as created
         by __init__(), will be used.
     """
+    ######## Critical Code (Async access to variables prohibited) ########
+    self.critical_lock.acquire()
+
     data = None
     if self.task_limit is None or len(self.tasks) < self.task_limit:
       task_id = str(self._get_new_task_id())
@@ -261,6 +269,7 @@ class ParallelManager(BaseManager):
 
       logging.debug(f'Task received. Number of queued tasks: {len(self.queued_tasks)}')
     
+    self.critical_lock.release()
     return Packet(data)
 
   def monitor(self,):
@@ -272,6 +281,9 @@ class ParallelManager(BaseManager):
       Returns connection. The server will send packets to the client through 
       this connection when tasks are waiting in the servers task queue.
     """
+    ######## Critical Code (Async access to variables prohibited) ########
+    self.critical_lock.acquire()
+    
     server_conn, client_conn = Pipe()
     client_id = self._get_new_client_id()
     self.clients[client_id] = {
@@ -281,6 +293,8 @@ class ParallelManager(BaseManager):
        'times_dead':  0
     }
     logging.debug(f'Client {client_id} connected.')
+
+    self.critical_lock.release()
     return Packet(client_conn)
   
   def _send_queued_task(self, client_id):
@@ -369,7 +383,7 @@ class ParallelManager(BaseManager):
     except Exception as e:
       logging.warning(f'Error occured completing task {task_id}: {e}')
   
-  def clear_task(self, task_id):
+  def _clear_task(self, task_id):
     """
       Removes all traces of a task being present on the server.
       Removes the task_id from all task queues and opens memory for additional 
@@ -390,6 +404,9 @@ class ParallelManager(BaseManager):
         the order of the 'task_ids' parameter.
       clear: If True, removes task from server memory after returning results.
     """
+    ######## Critical Code (Async access to variables prohibited) ########
+    self.critical_lock.acquire()
+
     thread_id = self._get_new_fetch_results_thread_id()
     server_conn, client_conn = Pipe()
     thread = Thread(
@@ -402,6 +419,8 @@ class ParallelManager(BaseManager):
     }
     thread.start()
 
+    self.critical_lock.release()
+
     promise = Promise(client_conn)
     return Packet(promise)
 
@@ -412,6 +431,9 @@ class ParallelManager(BaseManager):
       pass
     
     logging.debug('Requested tasks completed. Getting results.')
+    ######## Critical Code (Async access to variables prohibited) ########
+    self.critical_lock.acquire()
+    
     results = []
     for task_id in task_ids:
       task = self.tasks[task_id]
@@ -419,8 +441,10 @@ class ParallelManager(BaseManager):
       result = task.get('result')
       results.append(result)
       if clear:
-        self.clear_task(task_id)
+        self._clear_task(task_id)
     
+    self.critical_lock.release()
+
     if values_only:
       data = results
     else:
