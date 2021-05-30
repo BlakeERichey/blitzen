@@ -91,8 +91,10 @@ class DistributedDispatcher(BaseDispatcher):
     manager = ParallelManager(address=(server_ip, port), authkey=authkey)
     manager.connect()
     
-    print('Connected.', manager.address)
-    conn = manager.monitor().unpack() #Register client with server.
+    logging.info(f'Connected. {manager.address}')
+    promise = manager.monitor().unpack() #Register client with server.
+    print('Received packet')
+    conn = promise.connect(authkey)
     while True:
       logging.debug('Checking for tasks')
       packet = conn.recv()
@@ -162,5 +164,5 @@ class DistributedDispatcher(BaseDispatcher):
         task_ids, 
         values_only=values_only, 
         clear=clear).unpack()
-    results = promise.wait()
+    results = promise.wait(self.authkey)
     return results

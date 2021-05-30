@@ -13,7 +13,7 @@ if __name__ == '__main__':
 
     task_ids = []
     for i in range(5):
-        task_id = backend.run(time_consuming_function, i)
+        task_id = backend.run(time_consuming_function, i+5, timeout=2)
         task_ids.append(task_id)
     
     print('Waiting before getting results.')

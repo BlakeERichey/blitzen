@@ -2,9 +2,65 @@ import zlib
 import dill
 import pickle
 import socket
+import logging
+import datetime
+from multiprocessing.connection import Client
 
 def get_local_ip():
   return socket.gethostbyname(socket.gethostname())
+
+def get_free_port():
+  s = socket.socket(socket.AF_INET)
+  s.bind(('localhost', 0))
+  port = s.getsockname()[1]
+  s.close()
+  return port
+
+class Promise:
+  """
+    Client side packet for waiting for incoming packages and syncing 
+    subprocesses accross remote nodes.
+  """
+
+  def __init__(self, address):
+    self.conn = None
+    self.address = address
+
+  def wait(self, authkey):
+    if not self.conn:
+      self.connect(authkey)
+
+    while not self.conn.poll(): #Wait for data to be available
+      pass
+
+    data = self.conn.recv().unpack()
+    self.conn.close()
+    self.conn = None
+
+    return data
+  
+  def connect(self, authkey, timeout=None):
+    if not self.conn:
+      logging.info(f'Attempting to connect to {self.address}')
+      
+      now = datetime.datetime.now
+      start_time = now()
+      while self.conn is None and \
+        (timeout is None or (now() - start_time).total_seconds() > timeout):
+        self._connect(authkey)
+
+      logging.info(f'Connected to server located at {self.address}')
+    
+    return self.conn
+  
+  def _connect(self, authkey):
+    try:
+      self.conn = Client(self.address, authkey=authkey)
+      connected = True
+    except ConnectionRefusedError:
+      logging.warn('Promised connection was refused by server. Reattempting...')
+      connected = False
+    return connected
 
 class Packet:
   """
@@ -101,21 +157,3 @@ class Packet:
         raise Exception(msg)
     
     self.data = deserialized
-
-class Promise:
-  """
-    Client side packet for waiting for incoming packages and syncing 
-    subprocesses accross nodes.
-  """
-
-  def __init__(self, client_conn):
-    self.conn = client_conn
-
-  def wait(self,):
-    while not self.conn.poll(): #Wait for data to be available
-      pass
-
-    data = self.conn.recv().unpack()
-    self.conn.close()
-
-    return data

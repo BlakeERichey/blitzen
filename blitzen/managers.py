@@ -2,8 +2,9 @@ import logging
 import datetime
 from threading import Thread
 from multiprocessing import Pipe, Lock
+from multiprocessing.connection import Listener
 from multiprocessing.managers import BaseManager
-from .utils import Packet, Promise
+from .utils import Packet, Promise, get_free_port
 
 class ParallelManager(BaseManager):  
   def __init__(self, *args, timeout=None, task_limit=None, revive_limit=0, **kwargs):
@@ -32,7 +33,8 @@ class ParallelManager(BaseManager):
     self.revive_limit = revive_limit #Limit to number of times a timeout can occur on client
     self.clients = {
       #client_id: {
-      #  'connections': (server, client),
+      #  'listener':   mp.Listener,
+      #  'connection': mp.connection.Connection,
       #  'busy':   False,
       #  'alive':  True,
       #  'times_dead': 0 #Used to gauge continued revival of this client
@@ -41,7 +43,7 @@ class ParallelManager(BaseManager):
     self.fetch_results = {
       # 'id': {
       #   'thread': Thread,
-      #   'connections': (server_conn, client_conn)
+      #   'listener': mp.Listener
       # }
     }
     self.queued_tasks    = set() #task_ids
@@ -78,17 +80,17 @@ class ParallelManager(BaseManager):
         4. Receives task results from clients
         5. Close results-fetching threads.
     """
-    logging.debug('Monitoring Clients')
+    logging.info('Monitoring Clients')
     # self.connect()
     while not self._close_thread:
       ######## Critical Code (Async access to variables prohibited) ########
       self.critical_lock.acquire()
 
       ######## Check for queued tasks and idle clients ######## 
-      logging.debug(f'Queued tasks: {len(self.queued_tasks)}')
+      # logging.debug(f'Queued tasks: {len(self.queued_tasks)}')
       if len(self.queued_tasks):
         idle_clients = self._get_idle_clients()
-        logging.debug(f'Idle clients: {len(idle_clients)}')
+        # logging.debug(f'Idle clients: {len(idle_clients)}')
 
         if len(idle_clients):
           num_tasks_to_assign = min(len(idle_clients), len(self.queued_tasks))
@@ -116,24 +118,25 @@ class ParallelManager(BaseManager):
       
       ######## Receive task results and check for revival packet ########
       for client_id, client in self.clients.items():
-        logging.debug('Checking for results.')
-        server_conn = client['connections'][0]
+        # logging.debug('Checking for results.')
+        server_conn = client['connection']
         
-        task_done = server_conn.poll()
-        if task_done:
-          packet = server_conn.recv()
-          data = packet.unpack()
+        if server_conn:
+          task_done = server_conn.poll()
+          if task_done:
+            packet = server_conn.recv()
+            data = packet.unpack()
 
-          logging.debug(f'Results received: {data}')
+            logging.debug(f'Results received: {data}')
 
-          result  = data['result']
-          task_id = data['task_id']
+            result  = data['result']
+            task_id = data['task_id']
 
-          if task_id in self.active_tasks:
-            self._complete_task(task_id, result)
-          elif task_id in self.completed_tasks: #Task was terminated early
-            client['alive'] = True
-            #Do not update results on an already marked `completed` task
+            if task_id in self.active_tasks:
+              self._complete_task(task_id, result)
+            elif task_id in self.completed_tasks: #Task was terminated early
+              client['alive'] = True
+              #Do not update results on an already marked `completed` task
       
       ######## Close results-fetching threads ########
       thread_id_keys = list(self.fetch_results.keys()) #Because popping from self.fetch_results
@@ -144,16 +147,13 @@ class ParallelManager(BaseManager):
         if thread._started.is_set() and not thread.is_alive(): #Thread has finished
           logging.debug('Resolving get_results request.')
           thread.join()
-          server_conn, client_conn = tfield['connections']
-          client_conn.close()
-          server_conn.close()
         
           self.fetch_results.pop(thread_id) #Remove request
 
       ######## Permit other threads temporary access to variables ########
       self.critical_lock.release()
     
-    logging.debug('Closing Monitor Thread.')
+    logging.info('Closing Monitor Thread.')
 
   def _start_sub_thread(self,):
     self._close_thread = False  #Used is shutdown to terminate monitor thread
@@ -177,25 +177,28 @@ class ParallelManager(BaseManager):
     """
       Shuts down subthreads and releases memory allocations of tasks
     """
-    logging.debug('Shutting down monitor threads.')
+    logging.info('Shutting down monitor threads.')
     self._close_thread = True
     self.monitor_thread.join()
 
-    logging.debug('Releasing memory allocations.')
+    logging.info('Releasing memory allocations.')
     del self.tasks
     client_ids = list(self.clients.keys())
     for client_id in client_ids:
       client = self.clients[client_id]
-      server_conn, client_conn = client['connections']
+      listener = client['listener']
+      server_conn = client['connection']
       server_conn.close()
-      client_conn.close()
+      listener.close()
       del self.clients[client_id]
   
   def _get_idle_clients(self,):
     idle_clients = []
     for client_id, client in self.clients.items():
-      if client['alive'] and not client['busy']:
+      if client['alive'] and not client['busy'] and client['connection']:
         idle_clients.append(client_id)
+    if len(idle_clients) == 0:
+      print(self.clients)
     
     return idle_clients
 
@@ -267,7 +270,7 @@ class ParallelManager(BaseManager):
 
       data = task_id
 
-      logging.debug(f'Task received. Number of queued tasks: {len(self.queued_tasks)}')
+      logging.info(f'Task received. Number of queued tasks: {len(self.queued_tasks)}')
     
     self.critical_lock.release()
     return Packet(data)
@@ -283,19 +286,45 @@ class ParallelManager(BaseManager):
     """
     ######## Critical Code (Async access to variables prohibited) ########
     self.critical_lock.acquire()
+
+    ip = self._address[0]
+    port = get_free_port()
+    address = (ip, port)
+    listener = Listener(address, authkey=self._authkey)
     
-    server_conn, client_conn = Pipe()
     client_id = self._get_new_client_id()
     self.clients[client_id] = {
-       'connections': (server_conn, client_conn),
-       'busy':        False,
-       'alive':       True,
-       'times_dead':  0
+       'listener':   listener,
+       'connection': None,
+       'busy':       False,
+       'alive':      True,
+       'times_dead': 0
     }
-    logging.debug(f'Client {client_id} connected.')
+    logging.info(f'Client {client_id} connected.')
+    
+    #Currently letting garbage collector manager joining this thread.
+    thread = Thread(
+      target=ParallelManager._connect_monitor_client,
+      args=(self, client_id, listener)
+    )
+    thread.daemon = True
+    thread.start()
 
     self.critical_lock.release()
-    return Packet(client_conn)
+    logging.info(f'Released monitor lock {client_id}.')
+    return Packet(Promise(address))
+  
+  @staticmethod
+  def _connect_monitor_client(self, client_id, listener):
+    logging.info(f'Listening on {listener.address}')
+    server_conn = listener.accept()
+    
+    ######## Critical Code (Async access to variables prohibited) ########
+    self.critical_lock.acquire()
+    
+    self.clients[client_id]['connection'] = server_conn
+
+    self.critical_lock.release()
   
   def _send_queued_task(self, client_id):
     """
@@ -303,9 +332,9 @@ class ParallelManager(BaseManager):
       
       Finds a queued tasks and sends it to Client
     """
-    logging.debug(f'Assigning task to {client_id}.')
+    logging.info(f'Assigning task to {client_id}.')
     client = self.clients[client_id]
-    server_conn = self.clients[client_id]['connections'][0]
+    server_conn = self.clients[client_id]['connection']
     
     #Update Client Status
     client['busy'] = True
@@ -337,7 +366,7 @@ class ParallelManager(BaseManager):
     """
     for task_id in task_ids:
       task = self.tasks.get(task_id)
-      if task and task['running']:
+      if task and task['running_on']:
         client_id = task['running_on']
         #Update Client
         client = self.clients[client_id]
@@ -347,9 +376,10 @@ class ParallelManager(BaseManager):
 
         #Disconnect client
         if client['times_dead'] > self.revive_limit:
-          server_conn, client_conn = client['connections']
+          listener = client['listener']
+          server_conn = client['connection']
           server_conn.close()
-          client_conn.close()
+          listener.close()
           del self.clients[client_id]           
 
         #Update Task
@@ -408,29 +438,37 @@ class ParallelManager(BaseManager):
     self.critical_lock.acquire()
 
     thread_id = self._get_new_fetch_results_thread_id()
-    server_conn, client_conn = Pipe()
+    ip = self._address[0]
+    port = get_free_port()
+    address = (ip, port)
+    listener = Listener(address, authkey=self._authkey)
+
     thread = Thread(
       target=ParallelManager._get_results_thread,
-      args=(self, server_conn, task_ids, values_only, clear)
+      args=(self, listener, task_ids, values_only, clear)
     )
     self.fetch_results[thread_id] = {
       'thread': thread,
-      'connections': (server_conn, client_conn),
+      'listener': listener,
     }
     thread.start()
 
     self.critical_lock.release()
 
-    promise = Promise(client_conn)
+    promise = Promise(address)
     return Packet(promise)
 
   @staticmethod
-  def _get_results_thread(self, server_conn, task_ids, values_only, clear):
+  def _get_results_thread(self, listener, task_ids, values_only, clear):
+    logging.info(f'Listening on {listener.address}.')
+    server_conn = listener.accept() #Accept client's connection. Send to client through this connection
+    logging.info(f'Connection accepted from {listener.last_accepted}.')
+
     task_set = set(task_ids)
     while task_set.difference(self.completed_tasks):
       pass
     
-    logging.debug('Requested tasks completed. Getting results.')
+    logging.info('Requested tasks completed. Getting results.')
     ######## Critical Code (Async access to variables prohibited) ########
     self.critical_lock.acquire()
     
@@ -450,6 +488,8 @@ class ParallelManager(BaseManager):
     else:
       data = dict(zip(task_ids, results))
 
-    logging.debug('Returning results.')
+    logging.info('Returning results.')
     packet = Packet(data)
     server_conn.send(packet)
+    server_conn.close()
+    listener.close()
