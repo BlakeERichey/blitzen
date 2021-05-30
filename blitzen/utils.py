@@ -10,6 +10,9 @@ def get_local_ip():
   return socket.gethostbyname(socket.gethostname())
 
 def get_free_port():
+  """
+    Returns an OS determined available socket.
+  """
   s = socket.socket(socket.AF_INET)
   s.bind(('localhost', 0))
   port = s.getsockname()[1]
@@ -27,6 +30,16 @@ class Promise:
     self.address = address
 
   def wait(self, authkey):
+    """
+      Connect to server at the promised address
+      Then poll the underlying socket until data is returned by server.
+      Once data has been received, closes the connection.
+
+      This is done to permit client to poll sockets rather than the server.
+
+      # Returns
+      Data from the server endpoint specified by the underlying address.
+    """
     if not self.conn:
       self.connect(authkey)
 
@@ -40,16 +53,19 @@ class Promise:
     return data
   
   def connect(self, authkey, timeout=None):
+    """
+      Connects to server at the promised address.
+
+      Returns the client side connection that can be used to communincate with 
+      the server.
+    """
     if not self.conn:
-      logging.info(f'Attempting to connect to {self.address}')
       
       now = datetime.datetime.now
       start_time = now()
       while self.conn is None and \
         (timeout is None or (now() - start_time).total_seconds() > timeout):
         self._connect(authkey)
-
-      logging.info(f'Connected to server located at {self.address}')
     
     return self.conn
   

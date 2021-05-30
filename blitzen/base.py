@@ -24,7 +24,16 @@ class BaseDispatcher:
     """
     raise NotImplementedError
   
-  def get_results(self, task_ids=[], values_only=True):
+  def join(self,):
+    """
+      Gets results from all queued tasks and subsequently shuts down
+      the dispatcher.
+    """
+    results = self.get_results(task_ids=None, values_only=True)
+    self.shutdown()
+    return results
+  
+  def get_results(self, task_ids=None, values_only=True):
     """
       Gets the results to tasks associated with the passed in task_ids. 
       Hangs current thread until all the tasks are complete.

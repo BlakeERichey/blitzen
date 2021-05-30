@@ -1,6 +1,6 @@
-from multicore import MulticoreDispatcher
 import time
 import random
+from blitzen import MulticoreDispatcher
 
 def f1():
   delay = random.randint(3,5)
@@ -14,16 +14,13 @@ def f2(delay):
 
 
 if __name__ == '__main__':
-  try:
-    backend = MulticoreDispatcher(4)
-    task_id = backend.run(f2, 4)
-    task_ids = [task_id]
-    for i in range(5):
-      task_id = backend.run(f1)
-      task_ids.append(task_id)
-
-    print('Fetching Results to tasks:', task_ids)
-    results = backend.get_results(task_ids, values_only=True)
-    print('Recevied results from backend:', results)
-  finally:
-    backend.shutdown()
+  backend = MulticoreDispatcher(4)
+  task_id = backend.run(f2, 4)
+  task_ids = [
+    backend.run(f1)
+    for _ in range(5)
+  ]
+  
+  print('Fetching Results.')
+  results = backend.join()
+  print('Recevied results from backend:', results)
