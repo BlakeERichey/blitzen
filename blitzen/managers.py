@@ -117,14 +117,26 @@ class ParallelManager(BaseManager):
         self._kill_tasks(tasks_to_kill)
       
       ######## Receive task results and check for revival packet ########
-      for client_id, client in self.clients.items():
+      #Use list because popping from self.clients in event of connection error
+      client_ids = list(self.clients.keys())
+      for client_id in client_ids:
+        client = self.clients[client_id]
         # logging.debug('Checking for results.')
         server_conn = client['connection']
         
         if server_conn:
           task_done = server_conn.poll()
+          print('Task done:', task_done)
           if task_done:
-            packet = server_conn.recv()
+            try:
+              packet = server_conn.recv()
+            except Exception as e:
+              msg = 'Exception occurred while reading from client. ' + \
+                'Terminating connection.'
+              self._kill_client(client_id)
+              logging.warn(msg)
+              continue
+
             data = packet.unpack()
 
             logging.debug(f'Results received: {data}')
@@ -198,7 +210,8 @@ class ParallelManager(BaseManager):
       if client['alive'] and not client['busy'] and client['connection']:
         idle_clients.append(client_id)
     if len(idle_clients) == 0:
-      print(self.clients)
+      pass
+      # print(self.clients)
     
     return idle_clients
 
@@ -336,27 +349,38 @@ class ParallelManager(BaseManager):
     client = self.clients[client_id]
     server_conn = self.clients[client_id]['connection']
     
-    #Update Client Status
-    client['busy'] = True
-    
-    #Update Task Status
-    task_id = self.queued_tasks.pop() #if no task available, throws KeyError
-    self.active_tasks.add(task_id)
-    task = self.tasks[task_id]
-    modInfo = {
-      'start_time': datetime.datetime.now(), 
-      'running_on': client_id,
-    }
-    task.update(modInfo)
+    try:
+      task_id = self.queued_tasks.pop() #if no task available, throws KeyError
+      self.active_tasks.add(task_id)
+      task = self.tasks[task_id]
+      
+      needed_fields = {
+        'task_id': task.get('task_id'),
+        'func':    task.get('func'),
+        'args':    task.get('args'),
+        'kwargs':  task.get('kwargs'),
+      }
+      packet = Packet(needed_fields)
+      server_conn.send(packet)
 
-    needed_fields = {
-      'task_id': task.get('task_id'),
-      'func':    task.get('func'),
-      'args':    task.get('args'),
-      'kwargs':  task.get('kwargs'),
-    }
-    packet = Packet(needed_fields)
-    server_conn.send(packet)
+      #Update Client Status
+      client['busy'] = True
+      
+      #Update Task Status
+      modInfo = {
+        'start_time': datetime.datetime.now(), 
+        'running_on': client_id,
+      }
+      task.update(modInfo)
+    except KeyError:
+      pass
+    except Exception as e:
+      self.queued_tasks.add(task_id)
+      msg = 'Exception occurred while sending task to client. ' + \
+        'Terminating client connection.'
+      self._kill_client(client_id)
+      logging.warn(msg)
+
   
   def _kill_tasks(self, task_ids):
     """
@@ -369,18 +393,7 @@ class ParallelManager(BaseManager):
       if task and task['running_on']:
         client_id = task['running_on']
         #Update Client
-        client = self.clients[client_id]
-        client['alive'] = False
-        client['busy']  = False
-        client['times_dead'] += 1
-
-        #Disconnect client
-        if client['times_dead'] > self.revive_limit:
-          listener = client['listener']
-          server_conn = client['connection']
-          server_conn.close()
-          listener.close()
-          del self.clients[client_id]           
+        self._kill_client(client_id)
 
         #Update Task
         task['running_on'] = None
@@ -392,6 +405,23 @@ class ParallelManager(BaseManager):
           self.completed_tasks.add(task_id)
         except Exception as e:
           logging.warning(f'Error occured killing tasks: {e}')
+  
+  def _kill_client(self, client_id):
+    try:
+      client = self.clients[client_id]
+      client['alive'] = False
+      client['busy']  = False
+      client['times_dead'] += 1
+
+      #Disconnect client
+      if client['times_dead'] > self.revive_limit:
+        listener = client['listener']
+        server_conn = client['connection']
+        server_conn.close()
+        listener.close()
+        del self.clients[client_id]   
+    except KeyError: #Another thread has already killed process
+      pass
   
   def _complete_task(self, task_id, result):
     task = self.tasks[task_id]
@@ -490,6 +520,10 @@ class ParallelManager(BaseManager):
 
     logging.info('Returning results.')
     packet = Packet(data)
-    server_conn.send(packet)
+    try:
+      server_conn.send(packet)
+    except:
+      msg = 'Connection Error. Unable to fulfill fetch-results promise.'
+      logging.critical(msg)
     server_conn.close()
     listener.close()

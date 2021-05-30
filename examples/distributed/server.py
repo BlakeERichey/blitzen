@@ -9,5 +9,5 @@ logger.setLevel(0)
 
 if __name__ == '__main__':
     ip = get_local_ip()
-    backend = DistributedDispatcher(server_ip=ip, port=PORT, revive_limit=2)
+    backend = DistributedDispatcher(server_ip=ip, port=PORT, revive_limit=0)
     backend.spawn_server()

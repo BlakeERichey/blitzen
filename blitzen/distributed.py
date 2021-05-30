@@ -97,6 +97,10 @@ class DistributedDispatcher(BaseDispatcher):
     conn = promise.connect(authkey)
     while True:
       logging.debug('Checking for tasks')
+      
+      while not conn.poll(): #Wait for data to be available
+        pass
+      
       packet = conn.recv()
       task = packet.unpack()
       logging.debug('Task Received', task)
