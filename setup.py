@@ -17,6 +17,7 @@ setup(name='blitzen',
       author_email='blake.e.richey@gmail.com',
       url='https://github.com/BlakeERichey/blitzen',
       license='MIT',
+      python_requires='>=3.6',
       install_requires=[
         'dill>=0.3.3',
       ],
