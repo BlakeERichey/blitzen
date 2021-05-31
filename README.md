@@ -94,8 +94,8 @@ from common import time_consuming_function
 
 if __name__ == '__main__':
   ip = get_local_ip()
-  backend = DistributedDispatcher(server_ip=ip)
-  backend.spawn_server(duration=30) #Run server for 30 seconds
+  dispatcher = DistributedDispatcher(server_ip=ip)
+  dispatcher.spawn_server(duration=30) #Run server for 30 seconds
 ```
 
 ### Initialize your clients  
@@ -106,8 +106,8 @@ from common import time_consuming_function
 
 if __name__ == '__main__':
   ip = '192.168.1.2' #Server IP
-  backend = DistributedDispatcher(server_ip=ip)
-  backend.spawn_client(workers=6)
+  dispatcher = DistributedDispatcher(server_ip=ip)
+  dispatcher.spawn_client(workers=6)
 ```  
 
 ### Run your driver code to be executed by the clients  
@@ -118,18 +118,18 @@ from common import time_consuming_function
 
 if __name__ == '__main__':
   ip = '192.168.1.2' #Server IP
-  backend = DistributedDispatcher(server_ip=ip)
+  dispatcher = DistributedDispatcher(server_ip=ip)
 
   #With DistributedDispatcher you can specify an amount
   #of time each client has to finish their task
   #with the `timeout` keyword
   task_ids = [
-    backend.run(time_consuming_function, i+5, timeout=7) 
+    dispatcher.run(time_consuming_function, i+5, timeout=7) 
     for i in range(5)
   ]
 
   print('Requesting results.')
-  results = backend.join()
+  results = dispatcher.join()
   print(results)
 ```
 

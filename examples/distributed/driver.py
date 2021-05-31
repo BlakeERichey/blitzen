@@ -4,13 +4,13 @@ from common import time_consuming_function
 
 if __name__ == '__main__':
     ip = get_local_ip()
-    backend = DistributedDispatcher(server_ip=ip)
+    dispatcher = DistributedDispatcher(server_ip=ip)
 
     task_ids = [
-      backend.run(time_consuming_function, i+5, timeout=7)
+      dispatcher.run(time_consuming_function, i+5, timeout=7)
       for i in range(5)
     ]
 
     print('Requesting results.')
-    results = backend.join()
+    results = dispatcher.join()
     print(results)

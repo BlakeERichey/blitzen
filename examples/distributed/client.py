@@ -4,5 +4,5 @@ from common import time_consuming_function
 
 if __name__ == '__main__':
     ip = get_local_ip()
-    backend = DistributedDispatcher(server_ip=ip)
-    backend.spawn_client(workers=6)
+    dispatcher = DistributedDispatcher(server_ip=ip)
+    dispatcher.spawn_client(workers=6)
