@@ -3,7 +3,6 @@ from multiprocessing import Process
 from .logging import get_logger
 from .utils import Packet, get_local_ip
 from .base import BaseDispatcher
-from .multicore import MulticoreDispatcher
 from .managers import ParallelManager
 
 class DistributedDispatcher(BaseDispatcher):

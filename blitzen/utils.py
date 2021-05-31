@@ -1,4 +1,3 @@
-from logging import log
 import zlib
 import dill
 import pickle

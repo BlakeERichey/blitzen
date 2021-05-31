@@ -1,7 +1,6 @@
 import datetime
-from logging import log
 from threading import Thread
-from multiprocessing import Pipe, Lock
+from multiprocessing import Lock
 from multiprocessing.connection import Listener
 from multiprocessing.managers import BaseManager
 from .logging import get_logger
