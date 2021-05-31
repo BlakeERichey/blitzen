@@ -56,13 +56,18 @@ print('Recevied results from dispatcher:', results)
 
 The results are always returned in the order of `task_ids`. 
 
-Eventually you will have to shutdown the dispatcher to close the underlying worker processes. You can do this by explicitly calling `dispatcher.shutdown()`; however, if you would like to get the results and perform the shutdown in one line you can call `dispatcher.join()`. This results the all results in the order they were passed in to the dispatcher, then calls `dispatcher.shutdown()`:
+Eventually you will have to shutdown the dispatcher to close the underlying worker processes. 
+You can do this two ways.  
+1. `dispatcher.shutdown()` Terminates all worker subprocesses and deallocates memory resources.
+2. `dispatcher.join()` returns all results in task order as they were passed to the dispatcher, then calls `dispatcher.shutdown()`.
 
 ```Python
 print('Fetching Results.')
 results = dispatcher.join()
 print('Recevied results from dispatcher:', results)
 ```
+
+**Critical Note: Once you request a result from the dispatcher, it is removed the dispatchers memory by default. To override this feature use dispatcher.get_results(clear=False)**  
 
 A full example is visible [here](https://github.com/BlakeERichey/blitzen/blob/main/examples/multicore/demo.py).
 
@@ -90,7 +95,7 @@ from common import time_consuming_function
 if __name__ == '__main__':
   ip = get_local_ip()
   backend = DistributedDispatcher(server_ip=ip)
-  backend.spawn_server(duration=30)
+  backend.spawn_server(duration=30) #Run server for 30 seconds
 ```
 
 ### Initialize your clients  
