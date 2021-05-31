@@ -14,13 +14,13 @@ def f2(delay):
 
 
 if __name__ == '__main__':
-  backend = MulticoreDispatcher(4)
-  task_id = backend.run(f2, 4)
+  dispatcher = MulticoreDispatcher(4)
+  task_id = dispatcher.run(f2, 4)
   task_ids = [
-    backend.run(f1)
+    dispatcher.run(f1)
     for _ in range(5)
   ]
   
   print('Fetching Results.')
-  results = backend.join()
-  print('Recevied results from backend:', results)
+  results = dispatcher.join()
+  print('Recevied results from dispatcher:', results)

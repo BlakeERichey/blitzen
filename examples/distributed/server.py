@@ -1,8 +1,8 @@
 from blitzen.utils import get_local_ip
 from blitzen.distributed import DistributedDispatcher
-from common import time_consuming_function, PORT
+from common import time_consuming_function
 
 if __name__ == '__main__':
-    ip = get_local_ip()
-    backend = DistributedDispatcher(server_ip=ip, port=PORT, revive_limit=0)
-    backend.spawn_server(30)
+  ip = get_local_ip()
+  backend = DistributedDispatcher(server_ip=ip)
+  backend.spawn_server(duration=30)

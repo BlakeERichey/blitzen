@@ -6,12 +6,12 @@ from .base import BaseDispatcher
 
 class MulticoreDispatcher(BaseDispatcher):
 
-  def __init__(self, n_processes=1, timeout=None):
+  def __init__(self, workers=1, timeout=None):
     """
       Initializes a MulticoreDispatcher with a configurable number of cores
       
       #Arguments
-      n_processes: Int. Max number of subprocesses to spawn.
+      workers: Int. Max number of worker subprocesses to spawn.
       timeout: Max time in seconds to permit a Process to execute any given task.
         If None, the processes will continue to run until self.shutdown() is called.
     """
@@ -22,12 +22,12 @@ class MulticoreDispatcher(BaseDispatcher):
     self.active          = set()       #task_ids for active tasks
     self.queued          = set()       #task_ids that are waiting to be run
     self.timeout         = timeout     #max time for process
-    self.n_processes     = n_processes #max number of processes to spawn at one time
+    self.workers         = workers     #max number of worker processes to spawn at one time
     self.current_task_id = 1           #Manages task ids, tasks start from 1
     
 
     self.processes = {} #process_id: {'connections', 'process', 'running'}
-    for p_id in range(self.n_processes):
+    for p_id in range(self.workers):
       parent_conn, sub_conn = Pipe(duplex=True)
       p = Process(
         target=MulticoreDispatcher._spawn_subprocess, 

@@ -1,5 +1,10 @@
 import logging
 
+__all__ = [
+  'get_logger', 'set_logfile', 'set_loglevel', 
+  'disable', 'enable'
+]
+
 LOGGER_NAME = 'blitzen'
 LOGGING_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 _logger = None
