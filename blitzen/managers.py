@@ -1,9 +1,10 @@
-import logging
 import datetime
+from logging import log
 from threading import Thread
 from multiprocessing import Pipe, Lock
 from multiprocessing.connection import Listener
 from multiprocessing.managers import BaseManager
+from .logging import get_logger
 from .utils import Packet, Promise, get_free_port
 
 class ParallelManager(BaseManager):  
@@ -80,8 +81,6 @@ class ParallelManager(BaseManager):
         4. Receives task results from clients
         5. Close results-fetching threads.
     """
-    logging.info('Monitoring Clients')
-    # self.connect()
     while not self._close_thread:
       ######## Critical Code (Async access to variables prohibited) ########
       self.critical_lock.acquire()
@@ -127,7 +126,7 @@ class ParallelManager(BaseManager):
               msg = 'Exception occurred while reading from client. ' + \
                 'Terminating connection.'
               self._kill_client(client_id)
-              logging.warning(msg)
+              get_logger().warning(msg)
               continue
 
             data = packet.unpack()
@@ -155,7 +154,7 @@ class ParallelManager(BaseManager):
       ######## Permit other threads temporary access to variables ########
       self.critical_lock.release()
     
-    logging.info('Closing Monitor Thread.')
+    get_logger().info('Closing Monitor Thread.')
 
   def _start_sub_thread(self,):
     self._close_thread = False  #Used is shutdown to terminate monitor thread
@@ -179,11 +178,11 @@ class ParallelManager(BaseManager):
     """
       Shuts down subthreads and releases memory allocations of tasks
     """
-    logging.info('Shutting down monitor threads.')
+    get_logger().info('Shutting down monitor threads.')
     self._close_thread = True
     self.monitor_thread.join()
 
-    logging.info('Releasing memory allocations.')
+    get_logger().info('Releasing memory allocations.')
     del self.tasks
     client_ids = list(self.clients.keys())
     for client_id in client_ids:
@@ -199,9 +198,6 @@ class ParallelManager(BaseManager):
     for client_id, client in self.clients.items():
       if client['alive'] and not client['busy'] and client['connection']:
         idle_clients.append(client_id)
-    if len(idle_clients) == 0:
-      pass
-      # print(self.clients)
     
     return idle_clients
 
@@ -272,6 +268,7 @@ class ParallelManager(BaseManager):
       self.tasks[task_id] = task
 
       data = task_id
+      get_logger().info(f'Task received. Queued tasks: {len(self.queued_tasks)}.')
     
     self.critical_lock.release()
     return Packet(data)
@@ -301,7 +298,6 @@ class ParallelManager(BaseManager):
        'alive':      True,
        'times_dead': 0
     }
-    logging.info(f'Client {client_id} connected.')
     
     #Currently letting garbage collector manager joining this thread.
     thread = Thread(
@@ -317,6 +313,8 @@ class ParallelManager(BaseManager):
   @staticmethod
   def _connect_monitor_client(self, client_id, listener):
     server_conn = listener.accept()
+    ip, port = listener.last_accepted
+    get_logger().info(f'Client {client_id} connected at {ip}:{port}')
     
     ######## Critical Code (Async access to variables prohibited) ########
     self.critical_lock.acquire()
@@ -339,6 +337,9 @@ class ParallelManager(BaseManager):
       self.active_tasks.add(task_id)
       task = self.tasks[task_id]
       
+      msg = f'Sending task {task_id} to client {client_id}.'
+      get_logger().info(msg)
+
       needed_fields = {
         'task_id': task.get('task_id'),
         'func':    task.get('func'),
@@ -347,6 +348,10 @@ class ParallelManager(BaseManager):
       }
       packet = Packet(needed_fields)
       server_conn.send(packet)
+
+      msg = f'Task {task_id} sent. ' + \
+        f'Queued tasks: {len(self.queued_tasks)}'
+      get_logger().info(msg)
 
       #Update Client Status
       client['busy'] = True
@@ -361,11 +366,11 @@ class ParallelManager(BaseManager):
       pass
     except Exception as e:
       self.queued_tasks.add(task_id)
-      msg = 'Exception occurred while sending task to client. ' + \
-        'Terminating client connection.'
+      msg = f'Error sending task {task_id} to client.\n' + \
+        f'Terminating client {client_id} connection.'
       msg += f'\nException: {e}'
       self._kill_client(client_id)
-      logging.warning(msg)
+      get_logger().warning(msg)
 
   
   def _kill_tasks(self, task_ids):
@@ -386,11 +391,13 @@ class ParallelManager(BaseManager):
         task['completed'] = datetime.datetime.now()
         task['terminated_early'] = True
 
+        get_logger().warning(f'Task {task_id} timed out on client {client_id}.')
+
         try:
           self.active_tasks.remove(task_id)
           self.completed_tasks.add(task_id)
         except Exception as e:
-          logging.warning(f'Error occured killing tasks: {e}')
+          get_logger().warning(f'Error occured killing tasks: {e}')
   
   def _kill_client(self, client_id):
     try:
@@ -405,7 +412,9 @@ class ParallelManager(BaseManager):
         server_conn = client['connection']
         server_conn.close()
         listener.close()
-        del self.clients[client_id]   
+        del self.clients[client_id]
+        get_logger().warning(f'Client {client_id} has been disconnected.')
+
     except KeyError: #Another thread has already killed process
       pass
   
@@ -422,12 +431,13 @@ class ParallelManager(BaseManager):
     task['result']     = result
     task['running_on'] = None
     task['completed']  = datetime.datetime.now()
+    get_logger().info(f'Results received for task {task_id}.')
 
     try:
       self.active_tasks.remove(task_id)
       self.completed_tasks.add(task_id)
     except Exception as e:
-      logging.warning(f'Error occured completing task {task_id}: {e}')
+      get_logger().warning(f'Error occured completing task {task_id}: {e}')
   
   def _clear_task(self, task_id):
     """
@@ -512,6 +522,6 @@ class ParallelManager(BaseManager):
       server_conn.send(packet)
     except:
       msg = 'Connection Error. Unable to fulfill fetch-results promise.'
-      logging.critical(msg)
+      get_logger().critical(msg)
     server_conn.close()
     listener.close()

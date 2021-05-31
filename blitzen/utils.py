@@ -1,9 +1,10 @@
+from logging import log
 import zlib
 import dill
 import pickle
 import socket
-import logging
 import datetime
+from .logging import get_logger
 from multiprocessing.connection import Client
 
 def get_local_ip():
@@ -74,7 +75,8 @@ class Promise:
       self.conn = Client(self.address, authkey=authkey)
       connected = True
     except ConnectionRefusedError:
-      logging.warn('Promised connection was refused by server. Reattempting...')
+      logger = get_logger()
+      logger.warn('Promised connection was refused by server. Reattempting...')
       connected = False
     return connected
 

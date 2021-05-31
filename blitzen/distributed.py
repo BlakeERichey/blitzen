@@ -1,5 +1,6 @@
-import logging
 import datetime
+from multiprocessing import Process
+from .logging import get_logger
 from .utils import Packet, get_local_ip
 from .base import BaseDispatcher
 from .multicore import MulticoreDispatcher
@@ -55,7 +56,8 @@ class DistributedDispatcher(BaseDispatcher):
 
     # server = manager.get_server()
     ip = get_local_ip()
-    print(f'Server started. Local IP: {ip}. Port {self.port}.')
+    logger = get_logger()
+    logger.info(f'Server started. {ip}:{self.port}')
     
     time_running = (datetime.datetime.now() - start_time).total_seconds()
     while duration is None or time_running <= duration:
@@ -63,46 +65,55 @@ class DistributedDispatcher(BaseDispatcher):
     
     self.shutdown()
 
-  def spawn_client(self, n_processes=1):
+  def spawn_client(self, workers=1):
     """
       Uses the active thread to connect to the remote server.
       Sets the client to monitor the connected server for tasks. When tasks are 
       available, client will request the necessary functions and data to 
       complete, and then submit the computed result to the server.
       # Arguments
-      n_processes: Int. How many processes to spawn on the client.
+      workers: Int. How many worker processes to spawn on the client.
     """
 
-    if n_processes > 1:
-      dispatcher = MulticoreDispatcher(n_processes=n_processes)
-      task_ids = []
-      for i in range(n_processes):
-        task_id = dispatcher.run(
-          type(self)._spawn_client_wrapper, 
-          *self.manager_creds
+    if workers > 1:
+      processes = []
+      for worker_id in range(workers):
+        p = Process(
+          target=type(self)._spawn_client_wrapper, 
+          args=((worker_id,) + self.manager_creds),
         )
-        task_ids.append(task_id)
-      dispatcher.get_results(task_ids) #results not needed
+        p.start()
+        processes.append(p)
+      
+      for process in processes:
+        process.join()
     else:
       type(self)._spawn_client_wrapper(*self.manager_creds)
 
   @staticmethod
-  def _spawn_client_wrapper(server_ip, port, authkey):
+  def _spawn_client_wrapper(worker_id, server_ip, port, authkey):
     """
       Wrapper for multiprocessing backend to spawn clients in subprocesses.
     """
     manager = ParallelManager(address=(server_ip, port), authkey=authkey)
     manager.connect()
     
-    logging.info(f'Connected. {manager.address}')
+    logger = get_logger()
+    logger.info(f'Worker {worker_id} connected to: {manager.address}.')
     promise = manager.monitor().unpack() #Register client with server.
     conn = promise.connect(authkey)
     while True:
       while not conn.poll(): #Wait for data to be available
         pass
       
-      packet = conn.recv()
+      try:
+        packet = conn.recv()
+      except (ConnectionAbortedError, ConnectionResetError, EOFError):
+        logger.critical(f'Worker {worker_id} was disconnected from server.')
+        break
+      
       task = packet.unpack()
+
       
       #Unpack info and compute result
       if task is not None:
@@ -110,7 +121,12 @@ class DistributedDispatcher(BaseDispatcher):
         func      = task['func']
         args      = task['args']
         kwargs    = task['kwargs']
+        
+        logger.info(f'Worker {worker_id} received task {task_id}.')
+        
         result    = func(*args, **kwargs)
+
+        logger.info(f'Worker {worker_id} finished task {task_id}.')
         
         response = Packet({
             'task_id': task_id,
@@ -122,14 +138,15 @@ class DistributedDispatcher(BaseDispatcher):
     """
       Closes monitor threads of manager and associated subprocesses
     """
+    logger = get_logger()
     if self._started:
-      logging.info('Shutting down server.')
+      logger.info('Shutting down server.')
       try:
         self.manager.cleanup()
         self.manager.shutdown()
       except Exception as e:
         msg = f'Error occured shutting down server: {e}'
-        logging.critical(msg)
+        logger.critical(msg)
 
   def run(self, func, *args, timeout=None, **kwargs):
     """
