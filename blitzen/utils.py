@@ -97,11 +97,62 @@ class Packet:
       packet.
     """
     self.decompress()
+    self.deserialize()
     return self.data
-
-  def compress(self, level=1, iterations=1, threshold=0):
+  
+  def serialize(self, method=None):
     """
-      Serializes and compresses `self.data` to reduce payload across Pipes
+      Serializes `self.data` using the prescribed method. 
+      This is useful for transferring complex data types across a network.
+
+      method: One of ['pickle', 'dill']. If `None`, will attempt to pickle, 
+        and resort to dill when necessary.
+    """
+    serialized = self.data
+    if method is None:
+      try:
+        serialized = pickle.dumps(self.data)
+        self.serialize_method = 'pickle'
+      except Exception:
+        serialized = dill.dumps(self.data) #Can throw dill error, should do so.
+        self.serialize_method = 'dill'
+    else:
+      if method == 'pickle':
+        serialized = pickle.dumps(self.data)
+        self.serialize_method = 'pickle'
+      elif method == 'dill':
+        serialized = dill.dumps(self.data) #Can throw dill error, should do so.
+        self.serialize_method = 'dill'
+    
+    self.data = serialized
+    return self
+  
+  def deserialize(self,):
+    """
+      Deserializes self.data using the method that was used to serialize it by self.serialize().
+    """
+    deserialized = self.data
+    if self.serialize_method:
+      if self.serialize_method == 'pickle':
+        deserialized = pickle.loads(self.data)
+        self.serialize_method = None
+      
+      elif self.serialize_method == 'dill':
+        deserialized = dill.loads(self.data)
+        self.serialize_method = None
+      
+      else:
+        msg = 'Cant Deserialize Packet. ' + \
+          "Expected Serialization method to be one of [\'dill\', \'pickle\'], " + \
+          f'but got {self.serialize_method}.'
+        raise Exception(msg)
+    
+    self.data = deserialized
+    return self 
+    
+  def compress(self, level=-1, iterations=1, threshold=0):
+    """
+      Compresses `self.data` to reduce payload across Pipes
       Useful when sending data accross a Proxy or Pipe to a remote manager.
 
       # Arguments
@@ -116,30 +167,25 @@ class Packet:
         data, then it will also be compressed. If `None`, then will serialize, 
         but not compress.
     """
-    try:
-      serialized = pickle.dumps(self.data)
-      self.serialize_method = 'pickle'
-    except Exception:
-      serialized = dill.dumps(self.data) #Can throw dill error, should do so.
-      self.serialize_method = 'dill'
     
-    data = serialized
+    data = self.data
     if threshold is not None and len(data) > threshold: #If packet is sufficiently large, compress
 
       if iterations is None: #Compress until compression adds bytes
-        compressed = self._compress(serialized, level)
+        compressed = self._compress(self.data, level)
         while len(compressed) < len(data):
           data = compressed
-          compressed = self._compress(compressed, level) #adds 1 and end that must be offset
+          compressed = self._compress(compressed, level) #adds 1 at end that must be offset
         self.times_compressed -= 1 #offsetting to omit final compression
 
       elif iterations >= 1:
-        compressed = serialized
-        for i in range(iterations):
+        compressed = self.data
+        for _ in range(iterations):
           compressed = self._compress(compressed, level)
         data = compressed
     
     self.data = data
+    return self
   
   def _compress(self, data, level):
     compressed = zlib.compress(data, level=level)
@@ -157,20 +203,5 @@ class Packet:
       data = zlib.decompress(data)
       self.times_compressed -= 1
     
-    deserialized = data
-    if self.serialize_method:
-      if self.serialize_method == 'pickle':
-        deserialized = pickle.loads(data)
-        self.serialize_method = None
-      
-      elif self.serialize_method == 'dill':
-        deserialized = dill.loads(data)
-        self.serialize_method = None
-      
-      else:
-        msg = 'Cant Deserialize Packet. ' + \
-          "Expected Serialization method to be one of [\'dill\', \'pickle\'], " + \
-          f'but got {self.serialize_method}.'
-        raise Exception(msg)
-    
-    self.data = deserialized
+    self.data = data
+    return self

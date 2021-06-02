@@ -1,6 +1,10 @@
 from blitzen.utils import get_local_ip
 from blitzen.distributed import DistributedDispatcher
-from common import time_consuming_function
+import time
+
+def time_consuming_function(delay):
+  time.sleep(delay)
+  return delay
 
 if __name__ == '__main__':
     ip = get_local_ip()
