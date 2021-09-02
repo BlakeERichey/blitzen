@@ -3,6 +3,7 @@ import dill
 import pickle
 import socket
 import datetime
+import warnings
 from .logging import get_logger
 from multiprocessing.connection import Client
 
@@ -109,20 +110,21 @@ class Packet:
         and resort to dill when necessary.
     """
     serialized = self.data
-    if method is None:
-      try:
-        serialized = pickle.dumps(self.data)
-        self.serialize_method = 'pickle'
-      except Exception:
-        serialized = dill.dumps(self.data) #Can throw dill error, should do so.
-        self.serialize_method = 'dill'
-    else:
+    if method in {None, 'pickle'}:
       if method == 'pickle':
         serialized = pickle.dumps(self.data)
         self.serialize_method = 'pickle'
-      elif method == 'dill':
-        serialized = dill.dumps(self.data) #Can throw dill error, should do so.
-        self.serialize_method = 'dill'
+      else:
+        try:
+          serialized = pickle.dumps(self.data)
+          self.serialize_method = 'pickle'
+        except Exception:
+          serialized = dill.dumps(self.data) #Can throw dill error, should do so.
+          self.serialize_method = 'dill'
+
+    elif method == 'dill':
+      serialized = dill.dumps(self.data) #Can throw dill error, should do so.
+      self.serialize_method = 'dill'
     
     self.data = serialized
     return self
@@ -132,7 +134,8 @@ class Packet:
       Deserializes self.data using the method that was used to serialize it by self.serialize().
     """
     deserialized = self.data
-    if self.serialize_method:
+    if self.times_compressed == 0:
+
       if self.serialize_method == 'pickle':
         deserialized = pickle.loads(self.data)
         self.serialize_method = None
@@ -147,42 +150,50 @@ class Packet:
           f'but got {self.serialize_method}.'
         raise Exception(msg)
     
+    else:
+      warnings.warn('Unable to deserialize compressed Packet data. Refer to Packet.unpack().')
+    
     self.data = deserialized
     return self 
     
   def compress(self, level=-1, iterations=1, threshold=0):
     """
-      Compresses `self.data` to reduce payload across Pipes
+      Compresses `self.data` to reduce payload across Pipes. 
+      Can only be called after `self.serialize()`.
       Useful when sending data accross a Proxy or Pipe to a remote manager.
 
       # Arguments
       level: ZLIB compress parameter, -1 to 9 that dictates compression vs time
         efficiency. 1 is lowest compression but fastest. 9 is greatest 
-        compression. 0 means no compression, -1 means to intuit what level will \
+        compression. 0 means no compression, -1 means to intuit what level will 
         be the most efficient for speed and memory
-      iterations: How many times to compress. If None, will continuue compression
+      iterations: How many times to compress. If `None`, will continue compression
         until further compression no longer saves memory.
       threshold: Maximum size in bytes for the payload before compression is 
         deemed necessary. If the serialized payload exceeds this much 
-        data, then it will also be compressed. If `None`, then will serialize, 
-        but not compress.
+        data after compression, then it will be compressed further compressed 
+        up to the number of times set by `iterations`. 
     """
     
     data = self.data
-    if threshold is not None and len(data) > threshold: #If packet is sufficiently large, compress
+    if self.serialize_method:
+      if len(data) > threshold: #If packet is sufficiently large, compress
 
-      if iterations is None: #Compress until compression adds bytes
-        compressed = self._compress(self.data, level)
-        while len(compressed) < len(data):
+        if iterations is None: #Compress until compression adds bytes
+          compressed = self._compress(self.data, level)
+          while len(compressed) < len(data):
+            data = compressed
+            compressed = self._compress(compressed, level) #adds 1 at end that must be offset
+          self.times_compressed -= 1 #offsetting to omit final compression
+
+        elif iterations >= 1:
+          compressed = self.data
+          for _ in range(iterations):
+            compressed = self._compress(compressed, level)
           data = compressed
-          compressed = self._compress(compressed, level) #adds 1 at end that must be offset
-        self.times_compressed -= 1 #offsetting to omit final compression
-
-      elif iterations >= 1:
-        compressed = self.data
-        for _ in range(iterations):
-          compressed = self._compress(compressed, level)
-        data = compressed
+    
+    else:
+      warnings.warn('Attempting to compress non-serialized Packet data. No compression was made.')
     
     self.data = data
     return self
@@ -194,8 +205,8 @@ class Packet:
   
   def decompress(self):
     """
-      Identifies if deserialization or decompression is necessary. If so, 
-      this function deserializes and/or decompresses the stored data.
+      Identifies if decompression is necessary. If so, 
+      this function decompresses the stored data.
     """
     data = self.data
     times_compressed = self.times_compressed
